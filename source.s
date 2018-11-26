@@ -160,32 +160,54 @@ raster:
 	
 	comiss xmm3, xmm5
 	jge raster_noswap1
-	swapxmm  xmm0, xmm1, xmm3
-raster_noswap1:
+		swapxmm  xmm0, xmm1, xmm3
+		#<swap colors, normals>
+	raster_noswap1:
+
 	comiss xmm4, xmm6
 	jge raster_noswap2
-	swapxmm  xmm0, xmm2, xmm3
-raster_noswap2:
+		swapxmm  xmm0, xmm2, xmm3
+		#<swap colors, normals>
+	raster_noswap2:
 	
 	movaps [rbp+0x90], xmm2
 	movaps [rbp+0x80], xmm1
 	movaps [rbp+0x70], xmm0
 
 
-	movaps xmm3, xmm1
-	subps  xmm3, xmm0
-	movaps xmm4, xmm2
-	subps  xmm4, xmm0
+	movaps   xmm3, xmm1
+	subps    xmm3, xmm0
+	movaps   xmm4, xmm2
+	subps    xmm4, xmm0
+	movaps   xmm6, xmm3
 	unpcklps xmm3, xmm4
+	unpckhps xmm6, xmm4
 	movhlps  xmm4, xmm3
 	divps    xmm3, xmm4
+	divps    xmm6, xmm4
+	movlhps  xmm3, xmm6 # move higher bits of xmm6 to xmm3
 	 
 	cvtsi2ss xmm5, r9d	# convert r9d to a float
-	shufps xmm5, xmm5, 0x00   # put it in all 4 positions
-	movaps [rbp-0x10], xmm5 # throw this on the stack for future use
+	shufps  xmm5, xmm5, 0x00   # put it in all 4 positions
+	movaps  [rbp-0x10], xmm5 # throw this on the stack for future use
 	
-	mulps xmm3, xmm5      # mb, mc
-	movaps [rbp-0x20], xmm3 # store these as locals
+	mulps  xmm3, xmm5      
+	movaps [rbp-0x20], xmm3 # mb, mc, mdb, mdc
+
+	movss  xmm4, [rbp-0x20]
+	movss  xmm5, [rbp-0x1C]
+	comiss xmm4, xmm5
+	jl rasternoswap_mbc     # make sure mb < mc (b should be the left point, c will be the right) 
+
+		swapxmm  xmm1, xmm2, xmm3
+		#<swap colors, normals>
+		movss   [rbp-0x20], xmm5
+		movss   [rbp-0x1C], xmm4
+
+	rasternoswap_mbc:
+	
+	movaps [rbp+0x90], xmm2
+	movaps [rbp+0x80], xmm1
 	
 	
 	# todo: add ceils here if time permits
@@ -193,42 +215,180 @@ raster_noswap2:
 	je raster_topdown2
 		#bottom up
 		#compute y_start
-		movss xmm7, fltZeros
-		minss xmm7, [rbp+0x74]
+		movss    xmm7, fltZeros
+		minss    xmm7, [rbp+0x74]
 		cvtss2si eax, xmm7
-		mov [rbp-0x30], eax # y_start
+		mov      [rbp-0x30], eax # y_start
 
 		#compute y_end
-		movss xmm7, winHeight2
-		minss xmm7, [rbp+0x84]
-		minss xmm7, [rbp+0x94]
+		movss    xmm7, winHeight2
+		minss    xmm7, [rbp+0x84]
+		minss    xmm7, [rbp+0x94]
 		cvtss2si eax, xmm7
-		mov [rbp-0x34], eax # y_end
+		mov      [rbp-0x2C], eax # y_end
 	jmp raster_extopdown2
 	raster_topdown2:
 		#top down
 		#compute y_start
-		movss xmm7, winHeight2
-		minss xmm7, [rbp+0x74]
+		movss    xmm7, winHeight2
+		minss    xmm7, [rbp+0x74]
 		cvtss2si eax, xmm7
-		mov [rbp-0x30], eax  # y_start
+		mov      [rbp-0x30], eax  # y_start
 
 		#compute y_end
-		movss xmm7, fltZeros
-		maxss xmm7, [rbp+0x84]
-		maxss xmm7, [rbp+0x94]
+		movss    xmm7, fltZeros
+		maxss    xmm7, [rbp+0x84]
+		maxss    xmm7, [rbp+0x94]
 		cvtss2si eax, xmm7
-		mov [rbp-0x34], eax  # y_end
+		mov      [rbp-0x2C], eax  # y_end
 	raster_extopdown2:
 	
-	# compute mid_dist
-	movss xmm6, [rbp-0x74] # xmm6 =  [0].y
-	subss xmm6, [rbp-0x34] # xmm6 -= y_end
-	fabs  xmm6, xmm7       # xmm6 = |xmm6|
+	# # compute mid_dist
+	# movss xmm6, [rbp-0x74] # xmm6 =  [0].y
+	# subss xmm6, [rbp-0x34] # xmm6 -= y_end
+	# fabs  xmm6, xmm7       # xmm6 = |xmm6|
+
+	#		float mcfalph = 1.f / glm::abs(a.y - b.y);
+	#		float mcfbeta = 1.f / glm::abs(a.y - c.y);
+	movss xmm3, [rbp+0x74]
+	movss xmm6, xmm3	
+	movss xmm4, [rbp+0x84]
+	movss xmm5, [rbp+0x94]
+
+	subss xmm3, xmm4
+	subss xmm6, xmm5
 	
+	fabs  xmm3, xmm7
+	fabs  xmm6, xmm7
 	
+	rcpss xmm3, xmm3
+	rcpss xmm6, xmm6
+
+	movss [rbp-0x40], xmm3 # mcfalph
+	movss [rbp-0x3C], xmm6 # mcfbeta
+
+	# compute ayDist
+	mov       eax, [rbp-0x30] # y_start
+	cvtsi2ss  xmm4, eax
+	subss     xmm4, [rbp+0x74] # - a.y
+	mulss     xmm4, [rbp-0x10] # * dy
+	maxss     xmm4, fltZeros
+	shufps    xmm4, xmm4, 0x00
+	movaps    [rbp-0x100], xmm4 # ayDist
+
+	# compute starting bx cx bz cz
+	movaps xmm3, xmm0
+	shufps xmm3, xmm3, 0xA0
+	mulps  xmm4, [rbp-0x20]   # aydist * mb mc mdb mdc
+	addps  xmm4, xmm3         # + ax ax az az
+	movaps [rbp-0x50], xmm4  # bx cx bz cz
+
+	# compute starting alpha, beta
+	mulps  xmm4, [rbp-0x40]
+	movups xmm5, fltOnes
+	subps  xmm5, xmm4
+	movaps [rbp-0x60], xmm5 # alpha, beta
+	
+	xor    r8,  r8
+	mov    r8d, [rbp-0x30]  # y, the counter
+
+	raster_yloop:
+		#	// This is here so we can draw the middle line properly
+		#if (mb < 0) { if (bx < b.x) bx = b.x, bz = b.z, alpha = 0; }
+		#else        { if (bx > b.x) bx = b.x, bz = b.z, alpha = 0; }
+		#if (mc < 0) { if (cx < c.x) cx = c.x, cz = c.z, beta  = 0; }
+		#else        { if (cx > c.x) cx = c.x, cz = c.z, beta  = 0; }
+
+		#todo: round, don't floor
+		movss    xmm3, [rbp-0x50]
+		movss    xmm4, [rbp-0x4C]
+		maxss    xmm5, fltZeros    # xstart (float)   
+		minss    xmm4, winWidth2   
+		cvtss2si esi, xmm3         # xstart (int)
+		cvtss2si r11d, xmm4         # xend   (int) 
+
+		movss    xmm6, [rbp-0x4C]
+		subss    xmm6, [rbp-0x50]  
+		rcpss    xmm6, xmm6        # gamma step
+
+		movss    xmm7, [rbp-0x44]
+		subss    xmm7, [rbp-0x48]
+		mulss    xmm7, xmm6        # z step
+
+		movss    xmm8, xmm5
+		subss    xmm8, [rbp-0x50]  # bxDist
+		
+		movss    xmm9, xmm8
+		mulss    xmm9, xmm6
+		addss    xmm9, [rbp-0x48]  # starting z
+
+		mulss    xmm8,  xmm6
+		movss    xmm10, fltOnes
+		subss    xmm10, xmm8
+		movss    xmm8,  xmm10      # starting gamma (overwrites bxDist)
+
+		movss    xmm10, [rsp-0x60] # alpha
+		movss    xmm11, [rsp-0x5C] # beta
+		movss    xmm12, xmm10
+		subss    xmm12, xmm11      # alpha-beta
+		movss    xmm13, fltOnes
+		subss    xmm13, xmm10      # 1-alpha
+		movss    xmm14, fltOnes
+		subss    xmm14, xmm11      # 1-beta
+
+		mov      r10d,  winWidth
+		xor      rdx,   rdx
+		mov      edx,   esi        # x = xstart
+		raster_xloop:
+			
+			mov  rcx, 0xFFFF00FF
+			
+			xor  rax, rax
+			mov  eax, r8d
+			imul eax, r10d
+			add  eax, edx
+			mov  rbx, globalPixelBufPtr
+			mov  [rbx+rax*4], rcx
+
+			subss xmm8, xmm6
+			addss xmm9, xmm7
+
+			inc edx			
+			cmp edx, r11d
+			jle raster_xloop
+		
+		
+
+		movaps   xmm3, [rbp-0x50]
+		addps    xmm3, [rbp-0x20]
+
+		movaps   xmm3, [rbp-0x60]
+		subps    xmm3, [rbp-0x40]
+		
+		add      r8d,  r9d         # y += dy
+
+		cmp rdi, 1
+		je raster_topdown3
+			cmp r8d, [rbp-0x2C]   # y <= y_end
+			jle raster_yloop
+			jmp raster_exityloop
+		raster_topdown3:
+			cmp r8d, [rbp-0x2C]   # y >= y_end
+			jge raster_yloop
+			jmp raster_exityloop
+			
+	
+raster_exityloop:
+
 	mov rsp, rbp
 	pop rbp
+
+	
+
+
+
+
+
 	ret
 
 
@@ -398,7 +558,15 @@ mainLoop:
 	movups xmm0, [rax]
 	movups xmm1, [rax+0x10]
 	movups xmm2, [rax+0x20]
+	mov rdi, 1
 	call raster
+	lea rax, hardcodedtri
+	movups xmm0, [rax]
+	movups xmm1, [rax+0x10]
+	movups xmm2, [rax+0x20]
+	mov rdi, 0
+	call raster
+	add rsp, 0xA0
 	# rdi: bool topdown
 	# xmm0: pos1 (should be [ (0,0,X,1), (width,height,X,1) ]
 	# xmm1: pos2
@@ -503,7 +671,7 @@ quit:
 	syscall
 
 .data
-	hardcodedtri: .float 100,100,1,0, 200,200,2,0, 100,300,1,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
+	hardcodedtri: .float 100,120,1,0, 150,300,3,0, 260,130,2,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
 
 
 	fltAbsMask: .int 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF
@@ -513,11 +681,12 @@ quit:
 	fltOnes:  .float 1, 1, 1, 1
 	fltZeros: .float 0, 0, 0, 0
 
-	eventToProcess:	.space 56
-	globalWindowPtr: .space 8
-	pixelBufSize: .quad 0
-	globalPixelBufPtr: .space 8	
-	globalTexturePtr: .space 8
+	eventToProcess:	   .space 56
+	globalWindowPtr:   .space 8
+	pixelBufSize:      .quad 0
+	globalPixelBufPtr: .space 8
+	globalDepthBuf:    .space 8	
+	globalTexturePtr:  .space 8
 	globalRendererPtr: .space 8
 
 
@@ -525,10 +694,11 @@ quit:
 
 	myobjects_spec: .long  1,1,0
 	myobjects_mem:  .float 0,0,0,0,0,1,1,1,1, 0,1,0,0,0,1,1,1,1, 1,0,0,0,0,1,1,1,1
-	winWidth: .quad 600
-	winHeight: .quad 400
+	winWidth:   .quad  600
+	winWidth2:  .float 599
+	winHeight:  .quad  400
 	winHeight2: .float 399
-	winTitle: .asciz ""
+	winTitle:   .asciz ""
 	intformat: .asciz "here is an int: %i\n"
 	xmm0formatint: .asciz "xmm0 (int): %i, %i, %i, %i\n"
 	xmm0formatflt: .asciz "xmm0 (flt): %f, %f, %f, %f\n"
