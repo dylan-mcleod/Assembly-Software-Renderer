@@ -26,6 +26,72 @@ printint:
 	add rsp, 0x8
 	ret
 
+printxmm0int:
+	sub rsp, 0x18
+	movups [rsp], xmm0
+	mov rdi, OFFSET xmm0formatint
+	xor rsi, rsi
+	mov esi, [rsp]
+	xor rdx, rdx
+	mov edx, [rsp+4]
+	xor rcx, rcx
+	mov ecx, [rsp+8]
+	xor r8, r8
+	mov r8d, [rsp+12]
+
+	mov rax, 0x0
+	call printf
+
+	add rsp, 0x18
+	ret
+
+printxmm0flt:
+	sub rsp, 0x218
+	fxsave [rsp+0x10]
+
+	movups [rsp], xmm0
+	movss xmm0, [rsp]
+	movss xmm1, [rsp+4]
+	movss xmm2, [rsp+8]
+	movss xmm3, [rsp+12]
+	
+	mov rdi, OFFSET xmm0formatflt
+	cvtss2sd xmm0, xmm0
+	cvtss2sd xmm1, xmm1
+	cvtss2sd xmm2, xmm2
+	cvtss2sd xmm3, xmm3
+
+	mov rax, 0x4
+	call printf
+
+	fxrstor [rsp+0x10]
+	add rsp, 0x218
+	ret
+
+#pass arg as 4 floats in xmm0, answer in eax
+xmm2packed8888:
+	sub rsp, 0x18
+	movups xmm1, normMul
+	mulps xmm0, xmm1
+	cvtps2dq xmm0, xmm0
+
+	movups [rsp], xmm0
+    
+    xor rax, rax
+
+    mov al, [rsp]
+    shl rax, 8
+    mov al, [rsp+4]
+    shl rax, 8
+    mov al, [rsp+8]
+    shl rax, 8
+    mov al, [rsp+12]
+	
+	add rsp, 0x18
+	ret
+
+
+
 #screw the stack up ~~a little~~ quite a bit, don't reference stack variables relative to rsp
 align:
 	mov rax, [rsp]
@@ -131,6 +197,10 @@ main:
 
 	call inittexture
 
+	movups xmm0, fltTest
+	call xmm2packed8888
+	call printint
+
 
 
 
@@ -229,12 +299,16 @@ quit:
 	syscall
 
 .data
+	fltTest: .float 0.1, 1, 0.2, 0.8
+	normMul: .float 255, 255, 255, 255
+
 	eventToProcess:	.space 56
 	globalWindowPtr: .space 8
 	pixelBufSize: .quad 0
 	globalPixelBufPtr: .space 8	
 	globalTexturePtr: .space 8
 	globalRendererPtr: .space 8
+
 
 	running: .int 1
 
@@ -243,3 +317,5 @@ quit:
 	winHeight: .quad 400
 	winTitle: .asciz ""
 	intformat: .asciz "here is an int: %i\n"
+	xmm0formatint: .asciz "xmm0 (int): %i, %i, %i, %i\n"
+	xmm0formatflt: .asciz "xmm0 (flt): %f, %f, %f, %f\n"
