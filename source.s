@@ -46,7 +46,7 @@ printxmm0int:
 	ret
 
 printxmm0flt:
-	sub rsp, 0x228
+	sub rsp, 0x428
 
 	mov [rsp+0x18], rax
 	mov [rsp+0x10], rdi
@@ -74,7 +74,7 @@ printxmm0flt:
 	mov rax,[rsp+0x18]
 	mov rdi,[rsp+0x10]
 
-	add rsp, 0x228
+	add rsp, 0x428
 	ret
 
 #pass arg as 4 floats in xmm0, answer in eax
@@ -119,6 +119,13 @@ xmm2packed8888:
 	movaps \c, \a
 	movaps \a, \b
 	movaps \b, \c
+.endm
+
+.macro swapxmm_mem a, b, c, d
+	movaps \c, \a
+	movaps \d, \b
+	movaps \b, \c
+	movaps \a, \d
 .endm
 
 .macro fabs a, temp
@@ -180,7 +187,8 @@ raster_do2ndswap:
 		movaps [rbp+0x80], xmm1
 		movaps [rbp+0x70], xmm0
 
-		#<swap colors, normals>
+		swapxmm_mem [rbp+0x40], [rbp+0x50], xmm10, xmm11
+		swapxmm_mem [rbp+0x10], [rbp+0x20], xmm10, xmm11
 
 		jmp raster_do2ndswap
 	raster_noswap1:
@@ -193,7 +201,8 @@ raster_do2ndswap:
 		movaps [rbp+0x80], xmm1
 		movaps [rbp+0x70], xmm0
 
-		#<swap colors, normals>
+		swapxmm_mem [rbp+0x40], [rbp+0x60], xmm10, xmm11
+		swapxmm_mem [rbp+0x10], [rbp+0x30], xmm10, xmm11
 
 		jmp raster_do2ndswap
 	raster_noswap2:
@@ -228,7 +237,10 @@ raster_do2ndswap:
 	jc rasternoswap_mbc     # make sure mb < mc (b should be the left point, c will be the right) 
 
 		swapxmm  xmm1, xmm2, xmm3
-		#<swap colors, normals>
+
+		swapxmm_mem [rbp+0x50], [rbp+0x60], xmm10, xmm11
+		swapxmm_mem [rbp+0x20], [rbp+0x30], xmm10, xmm11
+
 		movaps   xmm6, [rbp-0x20]
 		shufps   xmm6, xmm6, 0xB1
 		movaps   [rbp-0x20], xmm6
@@ -348,7 +360,7 @@ raster_do2ndswap:
 		subss    xmm7, [rbp-0x48]
 		mulss    xmm7, xmm6        # z step
 
-		movss    xmm8, xmm5
+		movss    xmm8, xmm3
 		subss    xmm8, [rbp-0x50]  # bxDist
 		
 		movss    xmm9, xmm8
@@ -373,17 +385,47 @@ raster_do2ndswap:
 		xor      rdx,   rdx
 		mov      edx,   esi        # x = xstart
 		xor  rax, rax
+
+		mov  rbx, globalPixelBufPtr
+
 		raster_xloop:
 			
 			
-			mov  eax, r8d
-			mov  rcx, 0xFFFF00FF
+			mov  eax, r8d						
+
+			
+			movss xmm3, xmm8
+			movss xmm4, xmm8
+			movss xmm5, fltOnes
+
+			mulss xmm3, xmm12
+			mulss xmm4, xmm13
+			subss xmm5, xmm8
+
+			addss xmm3, xmm11
+			mulss xmm5, xmm14
+
+			mulss xmm4, normMul
+			mulss xmm3, normMul
+			mulss xmm5, normMul
+			cvtss2si r12d, xmm3
+			cvtss2si r13d, xmm4
+			cvtss2si r14d, xmm5
+			mov r15d, 255
+			
+			mov cl, r15b
+			shl ecx, 8
+			or cl, r14b
+			shl ecx, 8
+			or cl, r13b
+			shl ecx, 8
+			or cl, r12b
+			shl ecx, 8
 
 			imul eax, r10d
 			add  eax, edx
 
-			mov  rbx, globalPixelBufPtr
-			mov  [rbx+rax*4], rcx
+			mov  [rbx+rax*4], ecx
 
 			subss xmm8, xmm6
 			addss xmm9, xmm7
@@ -573,26 +615,24 @@ mainLoop:
 
 
 	lea rax, hardcodedtri
-	push [rax]
 	push [rax+0x8]
-	push [rax+0x10]
+	push [rax]
 	push [rax+0x18]
-	push [rax+0x20]
+	push [rax+0x10]
 	push [rax+0x28]
-	push [rax+0x30]
+	push [rax+0x20]
 	push [rax+0x38]
-	push [rax+0x40]
+	push [rax+0x30]
 	push [rax+0x48]
-	push [rax+0x50]
+	push [rax+0x40]
 	push [rax+0x58]
-	push [rax+0x60]
+	push [rax+0x50]
 	push [rax+0x68]
-	push [rax+0x70]
+	push [rax+0x60]
 	push [rax+0x78]
-	push [rax+0x80]
+	push [rax+0x70]
 	push [rax+0x88]
-	push [rax+0x90]
-	push [rax+0x98]
+	push [rax+0x80]
 	movups xmm0, [rax]
 	movups xmm1, [rax+0x10]
 	movups xmm2, [rax+0x20]
@@ -604,7 +644,7 @@ mainLoop:
 	movups xmm2, [rax+0x20]
 	mov rdi, 0
 	call raster
-	add rsp, 0xA0
+	add rsp, 0x90
 	# rdi: bool topdown
 	# xmm0: pos1 (should be [ (0,0,X,1), (width,height,X,1) ]
 	# xmm1: pos2
@@ -711,7 +751,7 @@ quit:
 .data
 	hardcodedtri: .float 100,130,1,0, 150,300,3,0, 260,120,2,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
 
-
+	fltThrees: .float 3, 3, 3, 3
 	fltAbsMask: .int 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF
 	fltTest: .float 0.1, 1, 0.2, 0.8
 	normMul: .float 255, 255, 255, 255
