@@ -172,18 +172,21 @@
 # can be simplified with a multiply-add instruction
 # see here: https://www.felixcloutier.com/x86/VFMADD132PS:VFMADD213PS:VFMADD231PS.html
 # testing sequential vs parallel instructions...
+# new note: now horribly inefficient
 .macro matmul_4x4_4x1 dst, a, b, c, d, vec, temp1, temp2, temp3, temp4
-	movaps \dst,   \vec
 	movaps \temp1, \vec
 	movaps \temp2, \vec
 	movaps \temp3, \vec
-	mulps  \dst,   \a
-	mulps  \temp1, \b
-	mulps  \temp2, \c
-	mulps  \temp3, \d
-	addps  \dst,   \temp1
-	addps  \temp2, \temp3
-	addps  \dst,   \temp2
+	movaps \temp4, \vec
+	movups \dst, fltZeros
+	dpps \temp1, \a, 0xF1
+	dpps \temp2, \b, 0xF2
+	dpps \temp3, \c, 0xF4
+	dpps \temp4, \d, 0xF8
+	addps \dst, \temp1
+	addps \dst, \temp2
+	addps \dst, \temp3
+	addps \dst, \temp4
 .endm
 
 # args are row-major
@@ -197,8 +200,7 @@ matmul_4x4_4x4:
 	matstor rsp, mat12
 	
 	#matload 
-	matTranspose         mat8,  mat4
-	matmove mat4, mat8
+	#matTranspose mat4,  mat8
 
 	# mat8 = mat0 * mat4
 	matmul_4x4_4x1 xmm8,  mat0, xmm4, mat12
@@ -905,8 +907,8 @@ mainLoop:
 	mov rsi, 0
 	mov r8, [rcx]
 
-	matload_ups mat4, mattest2
-	matload_ups mat0, mattest1
+	matload_ups mat4, finalrotationmatrix
+	matload_ups mat0, rotationmatrix1
 	call matmul_4x4_4x4
 	matstor_ups finalrotationmatrix, mat0
 	matmove     mat4, mat0
