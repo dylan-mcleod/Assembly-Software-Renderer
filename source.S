@@ -30,6 +30,20 @@
 	movaps [\dst+0x30], \d
 .endm
 
+.macro matload_ups a, b, c, d, src # load from src to a b c d
+	movups \a, [\src]
+	movups \b, [\src+0x10]
+	movups \c, [\src+0x20]
+	movups \d, [\src+0x30]
+.endm
+
+.macro matstor_ups dst, a, b, c, d # store a b c d in dst 
+	movups [\dst], \a
+	movups [\dst+0x10], \b
+	movups [\dst+0x20], \c
+	movups [\dst+0x30], \d
+.endm
+
 .macro matcopy da, db, dc, dd, sa, sb, sc, sd
 	movaps \da, \sa
 	movaps \db, \sb
@@ -153,7 +167,7 @@
 # can be simplified with a multiply-add instruction
 # see here: https://www.felixcloutier.com/x86/VFMADD132PS:VFMADD213PS:VFMADD231PS.html
 # testing sequential vs parallel instructions...
-.macro matmul_4x4_4x1_transposed dst, a, b, c, d, vec, temp1, temp2, temp3, temp4
+.macro matmul_4x4_4x1 dst, a, b, c, d, vec, temp1, temp2, temp3, temp4
 	movaps \dst,   \vec
 	movaps \temp1, \vec
 	movaps \temp2, \vec
@@ -180,10 +194,10 @@ matmul_4x4_4x4:
 	#matload 
 	# matTranspose              mat0,  mat8
 	# mat8 = mat0 * mat4
-	matmul_4x4_4x1_transposed xmm8,  mat0, xmm4, mat12
-	matmul_4x4_4x1_transposed xmm9,  mat0, xmm5, mat12
-	matmul_4x4_4x1_transposed xmm10, mat0, xmm6, mat12
-	matmul_4x4_4x1_transposed xmm11, mat0, xmm7, mat12
+	matmul_4x4_4x1 xmm8,  mat0, xmm4, mat12
+	matmul_4x4_4x1 xmm9,  mat0, xmm5, mat12
+	matmul_4x4_4x1 xmm10, mat0, xmm6, mat12
+	matmul_4x4_4x1 xmm11, mat0, xmm7, mat12
 	# mat0 = mat8
 	matcopy mat0, mat8
 	
@@ -310,24 +324,24 @@ printxmm0flt:
 
 #pass arg as 4 floats in xmm0, answer in eax
 xmm2packed8888:
-	sub rsp, 0x18
+	sub rsp, 0x528
 	movups xmm1, normMul
 	mulps xmm0, xmm1
 	cvtps2dq xmm0, xmm0
 
 	movups [rsp], xmm0
     
-    xor rax, rax
+	xor rax, rax
 
-    mov al, [rsp]
-    shl rax, 8
-    mov al, [rsp+4]
-    shl rax, 8
-    mov al, [rsp+8]
-    shl rax, 8
-    mov al, [rsp+12]
+	mov al, [rsp]
+	shl rax, 8
+	mov al, [rsp+4]
+	shl rax, 8
+	mov al, [rsp+8]
+	shl rax, 8
+	mov al, [rsp+12]
 	
-	add rsp, 0x18
+	add rsp, 0x528
 	ret
 
 #dst, xmm, xmm, xmm
@@ -380,7 +394,10 @@ xmm2packed8888:
 raster:
 	push rbp
 	mov rbp, rsp
-	
+
+	sub rsp, 0x120
+	pushall
+
 	movaps [rbp+0x90], xmm2
 	movaps [rbp+0x80], xmm1
 	movaps [rbp+0x70], xmm0
@@ -418,8 +435,8 @@ raster_do2ndswap:
 		movaps [rbp+0x80], xmm1
 		movaps [rbp+0x70], xmm0
 
-		swapxmm_mem [rbp+0x40], [rbp+0x50], xmm10, xmm11
-		swapxmm_mem [rbp+0x10], [rbp+0x20], xmm10, xmm11
+		#swapxmm_mem [rbp+0x40], [rbp+0x50], xmm10, xmm11
+		#swapxmm_mem [rbp+0x10], [rbp+0x20], xmm10, xmm11
 
 		jmp raster_do2ndswap
 	raster_noswap1:
@@ -432,8 +449,8 @@ raster_do2ndswap:
 		movaps [rbp+0x80], xmm1
 		movaps [rbp+0x70], xmm0
 
-		swapxmm_mem [rbp+0x40], [rbp+0x60], xmm10, xmm11
-		swapxmm_mem [rbp+0x10], [rbp+0x30], xmm10, xmm11
+		#swapxmm_mem [rbp+0x40], [rbp+0x60], xmm10, xmm11
+		#swapxmm_mem [rbp+0x10], [rbp+0x30], xmm10, xmm11
 
 		jmp raster_do2ndswap
 	raster_noswap2:
@@ -469,8 +486,8 @@ raster_do2ndswap:
 
 		swapxmm  xmm1, xmm2, xmm3
 
-		swapxmm_mem [rbp+0x50], [rbp+0x60], xmm10, xmm11
-		swapxmm_mem [rbp+0x20], [rbp+0x30], xmm10, xmm11
+		#swapxmm_mem [rbp+0x50], [rbp+0x60], xmm10, xmm11
+		#swapxmm_mem [rbp+0x20], [rbp+0x30], xmm10, xmm11
 
 		movaps   xmm6, [rbp-0x20]
 		shufps   xmm6, xmm6, 0xB1
@@ -599,8 +616,8 @@ raster_do2ndswap:
 		subss    xmm10, xmm8
 		movss    xmm8,  xmm10      # starting gamma (overwrites bxDist)
 
-		movss    xmm10, [rsp-0x60] # alpha
-		movss    xmm11, [rsp-0x5C] # beta
+		movss    xmm10, [rbp-0x60] # alpha
+		movss    xmm11, [rbp-0x5C] # beta
 		movss    xmm12, xmm10
 		subss    xmm12, xmm11      # alpha-beta
 		movss    xmm13, fltOnes
@@ -639,20 +656,38 @@ raster_do2ndswap:
 			cvtss2si r13d, xmm4
 			cvtss2si r14d, xmm5
 			mov r15d, 255
+
+			movaps xmm0, [rbp+0x20]
+
 			
-			mov cl, r15b
-			shl ecx, 8
-			or cl, r14b
-			shl ecx, 8
-			or cl, r13b
-			shl ecx, 8
-			or cl, r12b
-			shl ecx, 8
+			push rax
+			call xmm2packed8888
+			mov r15d, eax
+			pop rax	
+			mov r15b, 255
+	
+			#mov  [rbx+rax*4], r15d
+			
+			#mov cl, r15b
+			#shl ecx, 8
+			#or cl, r14b
+			#shl ecx, 8
+			#or cl, r13b
+			#shl ecx, 8
+			#or cl, r12b
+			#shl ecx, 8
 
 			imul eax, r10d
 			add  eax, edx
 
-			mov  [rbx+rax*4], ecx
+			cmp r8d, 0
+			jle raster_skipy
+
+			cmp r8d, winHeight
+			jge raster_skipy
+			
+
+			mov  [rbx+rax*4], r15d
 
 			subss xmm8, xmm6
 			addss xmm9, xmm7
@@ -661,7 +696,7 @@ raster_do2ndswap:
 			cmp edx, r11d
 			jle raster_xloop
 		
-		
+		raster_skipy:		
 
 		movaps   xmm3, [rbp-0x50]
 		addps    xmm3, [rbp-0x20]
@@ -686,6 +721,8 @@ raster_do2ndswap:
 			
 	
 raster_exityloop:
+
+	popall
 
 	mov rsp, rbp
 	pop rbp
@@ -838,40 +875,95 @@ mainLoop:
 	mov rdx, 0xFF0000FF
 	call drawpixel
 
-
-
-
-	lea rax, hardcodedtri
-	push [rax+0x8]
-	push [rax]
-	push [rax+0x18]
-	push [rax+0x10]
-	push [rax+0x28]
-	push [rax+0x20]
-	push [rax+0x38]
-	push [rax+0x30]
-	push [rax+0x48]
-	push [rax+0x40]
-	push [rax+0x58]
-	push [rax+0x50]
-	push [rax+0x68]
-	push [rax+0x60]
-	push [rax+0x78]
-	push [rax+0x70]
-	push [rax+0x88]
-	push [rax+0x80]
-	movups xmm0, [rax]
-	movups xmm1, [rax+0x10]
-	movups xmm2, [rax+0x20]
-	mov rdi, 1
-	call raster
-	lea rax, hardcodedtri
-	movups xmm0, [rax]
-	movups xmm1, [rax+0x10]
-	movups xmm2, [rax+0x20]
+	lea rax, vertexbuffer
+	lea rcx, objects
 	mov rdi, 0
-	call raster
-	add rsp, 0x90
+	mov rbx, curobject
+	add rcx, 8
+	looptillobjectfound:
+		add rdi, 1
+		cmp rdi, rbx
+		jge exitlooptillobjectfound
+
+		mov rsi, [rcx]
+		imul rsi, 72
+		add rax, rsi
+		add rcx, 8
+		jmp looptillobjectfound
+	exitlooptillobjectfound:
+
+	lea rcx, objects
+	lea rcx, [rcx+rbx*8+8]
+
+	mov rsi, 0
+	mov r8, [rcx]
+
+	renderobject:
+		push [rax+0x8]
+		push [rax]
+		push [rax+0x18]
+		push [rax+0x10]
+		push [rax+0x28]
+		push [rax+0x20]
+		push [rax+0x38]
+		push [rax+0x30]
+		push [rax+0x48]
+		push [rax+0x40]
+		push [rax+0x58]
+		push [rax+0x50]
+		push [rax+0x68]
+		push [rax+0x60]
+		push [rax+0x78]
+		push [rax+0x70]
+		push [rax+0x88]
+		push [rax+0x80]
+		movups xmm8, [rax]
+		movups xmm9, [rax+24]
+		movups xmm10, [rax+48]
+		matload_ups mat4 _scalemat
+		matmul_4x4_4x1 xmm0, mat4, xmm8, mat12
+		matmul_4x4_4x1 xmm1, mat4, xmm9, mat12
+		matmul_4x4_4x1 xmm2, mat4, xmm10, mat12
+		#call printxmm0flt
+
+		movups xmm11, fltZeros	
+		movups xmm12, fltOnes	
+
+		movups xmm8, [rax+12]
+		fabs xmm8, xmm15
+		minps xmm8, xmm12
+		maxps xmm8, xmm11
+		movups xmm9, [rax+36]
+		fabs xmm9, xmm15
+		minps xmm9, xmm12
+		maxps xmm9, xmm11
+		movups xmm10, [rax+60]
+		fabs xmm10, xmm15
+		minps xmm10, xmm12
+		maxps xmm10, xmm11
+
+		movups [rsp], xmm8
+		movups [rsp-0x10], xmm9
+		movups [rsp-0x20], xmm10
+
+		mov rdi, 1
+		call raster
+
+		movups xmm8, [rax]
+		movups xmm9, [rax+24]
+		movups xmm10, [rax+48]
+		matload_ups mat4 _scalemat
+		matmul_4x4_4x1 xmm0, mat4, xmm8, mat12
+		matmul_4x4_4x1 xmm1, mat4, xmm9, mat12
+		matmul_4x4_4x1 xmm2, mat4, xmm10, mat12
+		mov rdi, 0
+		call raster
+		add rsp, 0x90
+		add rax, 72
+
+		inc rsi
+		cmp rsi, r8
+		jl renderobject
 	# rdi: bool topdown
 	# xmm0: pos1 (should be [ (0,0,X,1), (width,height,X,1) ]
 	# xmm1: pos2
@@ -978,10 +1070,29 @@ quit:
 .data
 	hardcodedtri: .float 100,130,1,0, 150,300,3,0, 260,120,2,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
 
+	objects: .quad 2, 12, 20
+	curobject: .quad 1
+	vertexbuffer: .float -0.500, -0.500, -0.500,  0.000,  0.000, -1.000,-0.500,  0.500, -0.500,  0.000,  0.000, -1.000, 0.500,  0.500, -0.500,  0.000,  0.000, -1.000, 0.500,  0.500, -0.500,  0.000, -0.000, -1.000, 0.500, -0.500, -0.500,  0.000, -0.000, -1.000,-0.500, -0.500, -0.500,  0.000, -0.000, -1.000,-0.500, -0.500, -0.500,  0.000, -1.000,  0.000, 0.500, -0.500, -0.500,  0.000, -1.000,  0.000, 0.500, -0.500,  0.500,  0.000, -1.000,  0.000, 0.500, -0.500,  0.500, -0.000, -1.000,  0.000,-0.500, -0.500,  0.500, -0.000, -1.000, 0.000,-0.500, -0.500,-0.500, -0.000, -1.000,  0.000,-0.500, -0.500, -0.500, -1.000,  0.000,  0.000,-0.500, -0.500,  0.500, -1.000,  0.000,  0.000,-0.500,  0.500,  0.500, -1.000,  0.000,  0.000,-0.500,  0.500,  0.500, -1.000,  0.000, -0.000,-0.500,  0.500, -0.500, -1.000,  0.000, -0.000,-0.500, -0.500, -0.500, -1.000,  0.000, -0.000,-0.500,  0.500, -0.500,  0.000,  1.000,  0.000,-0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500, -0.500,  0.000,  1.000,  0.000,-0.500,  0.500, -0.500,  0.000,  1.000,  0.000, 0.500,  0.500, -0.500,  1.000,  0.000, -0.000, 0.500,  0.500,  0.500,  1.000,  0.000, -0.000, 0.500, -0.500,  0.500,  1.000,  0.000, -0.000, 0.500, -0.500,  0.500,  1.000,  0.000,  0.000, 0.500, -0.500, -0.500,  1.000,  0.000,  0.000, 0.500,  0.500, -0.500,  1.000,  0.000,  0.000,-0.500, -0.500,  0.500,  0.000,  0.000,  1.000, 0.500, -0.500,  0.500,  0.000,  0.000,  1.000, 0.500,  0.500,  0.500,  0.000,  0.000,  1.000, 0.500,  0.500,  0.500,  0.000,  0.000,  1.000,-0.500,  0.500,  0.500,  0.000,  0.000,  1.000,-0.500, -0.500,  0.500,  0.000,  0.000,  1.000,  0.524,  0.000,  0.847,  0.000, -0.356,  0.934,-0.524,  0.000,  0.847,  0.000, -0.356,  0.934, 0.000, -0.847,  0.524,  0.000, -0.356,  0.934, 0.524,  0.000,  0.847,  0.000,  0.356,  0.934, 0.000,  0.847,  0.524,  0.000,  0.356,  0.934,-0.524,  0.000,  0.847,  0.000,  0.356,  0.934, 0.524,  0.000,  0.847,  0.577, -0.577,  0.577, 0.000, -0.847,  0.524,  0.577, -0.577,  0.577, 0.847, -0.524,  0.000,  0.577, -0.577,  0.577, 0.524,  0.000,  0.847,  0.934,  0.000,  0.356, 0.847, -0.524,  0.000,  0.934,  0.000,  0.356, 0.847,  0.524,  0.000,  0.934,  0.000,  0.356, 0.524,  0.000,  0.847,  0.577,  0.577,  0.577, 0.847,  0.524,  0.000,  0.577,  0.577,  0.577, 0.000,  0.847,  0.524,  0.577,  0.577,  0.577, 0.847, -0.524,  0.000,  0.934,  0.000, -0.356, 0.524,  0.000, -0.847,  0.934,  0.000, -0.356, 0.847,  0.524,  0.000,  0.934,  0.000, -0.356, 0.847,  0.524,  0.000,  0.577,  0.577, -0.577, 0.524,  0.000, -0.847,  0.577,  0.577, -0.577, 0.000,  0.847, -0.524,  0.577,  0.577, -0.577, 0.847,  0.524,  0.000,  0.356,  0.934,  0.000, 0.000,  0.847, -0.524,  0.356,  0.934,  0.000, 0.000,  0.847,  0.524,  0.356,  0.934,  0.000, 0.000,  0.847,  0.524, -0.356,  0.934,  0.000, 0.000,  0.847, -0.524, -0.356,  0.934,  0.000,-0.847,  0.524,  0.000, -0.356,  0.934,  0.000, 0.000,  0.847,  0.524, -0.577,  0.577,  0.577,-0.847,  0.524,  0.000, -0.577,  0.577,  0.577, -0.524,  0.000,  0.847, -0.577,  0.577,  0.577,-0.524,  0.000,  0.847, -0.934,  0.000,  0.356,-0.847,  0.524,  0.000, -0.934,  0.000,  0.356,-0.847, -0.524,  0.000, -0.934,  0.000,  0.356,-0.524,  0.000,  0.847, -0.577, -0.577,  0.577,-0.847, -0.524,  0.000, -0.577, -0.577,  0.577, 0.000, -0.847,  0.524, -0.577, -0.577,  0.577, 0.000, -0.847,  0.524, -0.356, -0.934, -0.000,-0.847, -0.524,  0.000, -0.356, -0.934, -0.000, 0.000, -0.847, -0.524, -0.356, -0.934, -0.000, 0.000, -0.847,  0.524,  0.356, -0.934,  0.000, 0.000, -0.847, -0.524,  0.356, -0.934,  0.000, 0.847, -0.524,  0.000,  0.356, -0.934,  0.000, 0.847, -0.524,  0.000,  0.577, -0.577, -0.577, 0.000, -0.847, -0.524,  0.577, -0.577, -0.577, 0.524,  0.000, -0.847,  0.577, -0.577, -0.577,-0.524,  0.000, -0.847,  0.000, -0.356, -0.934, 0.524,  0.000, -0.847,  0.000, -0.356, -0.934, 0.000, -0.847, -0.524,  0.000, -0.356, -0.934,-0.524,  0.000, -0.847,  0.000,  0.356, -0.934, 0.000,  0.847, -0.524,  0.000,  0.356, -0.934, 0.524,  0.000, -0.847,  0.000,  0.356, -0.934,-0.524,  0.000, -0.847, -0.577,  0.577, -0.577,-0.847,  0.524,  0.000, -0.577,  0.577, -0.577, 0.000,  0.847, -0.524, -0.577,  0.577, -0.577,-0.524,  0.000, -0.847, -0.934,  0.000, -0.356,-0.847, -0.524,  0.000, -0.934,  0.000, -0.356,-0.847,  0.524,  0.000, -0.934,  0.000, -0.356,-0.524,  0.000, -0.847, -0.577, -0.577, -0.577, 0.000, -0.847, -0.524, -0.577, -0.577, -0.577,-0.847, -0.524,  0.000, -0.577, -0.577, -0.577
+
+	modelmatrix: .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1
+	_scalemat: .float 200, 0, 0, 0, 0, 200, 0, 0, 0, 0, 200, 0, 0, 0, 0, 1
+	_transmat: .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0, 300, 200, 300, 0
+	rotationmatrix1: .float 0.9666981, -0.2471007,  0.0666038, 0,  0.2471007,  0.8334905, -0.4942013, 0,   0.0666038,  0.4942013,  0.8667924, 0,     0, 0, 0, 1
+	rotationmatrix2: .float 0.9996954, -0.0171434,  0.0177525, 0,   0.0177525,  0.9992386, -0.0347437, 0,   -0.0171434,  0.0350482,  0.9992386, 0,    0, 0, 0, 1
+
+
+
+
+
 	fltThrees: .float 3, 3, 3, 3
 	fltAbsMask: .int 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF
 	fltTest: .float 0.1, 1, 0.2, 0.8
 	normMul: .float 255, 255, 255, 255
+
+	ident1: .float 1, 0, 0, 0
+	ident2: .float 0, 1, 0, 0
+	ident3: .float 0, 0, 1, 0
+	ident4: .float 0, 0, 0, 1
 
 	fltOnes:  .float 1, 1, 1, 1
 	fltZeros: .float 0, 0, 0, 0
@@ -997,8 +1108,6 @@ quit:
 
 	running: .int 1
 
-	myobjects_spec: .long  1,1,0
-	myobjects_mem:  .float 0,0,0,0,0,1,1,1,1, 0,1,0,0,0,1,1,1,1, 1,0,0,0,0,1,1,1,1
 	winWidth:   .quad  600
 	winWidth2:  .float 599
 	winHeight:  .quad  400
