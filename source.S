@@ -6,6 +6,201 @@
 .equ true, 1
 .equ false, 0
 
+
+
+#define mat0  xmm0,  xmm1, xmm2, xmm3
+#define mat4  xmm4,  xmm5, xmm6, xmm7
+#define mat8  xmm8,  xmm9, xmm10, xmm11
+#define mat12 xmm12, xmm13, xmm14, xmm15
+
+
+
+
+.macro matload a, b, c, d, src # load from src to a b c d
+	movaps \a, [\src]
+	movaps \b, [\src+0x10]
+	movaps \c, [\src+0x20]
+	movaps \d, [\src+0x30]
+.endm
+
+.macro matstor dst, a, b, c, d # store a b c d in dst 
+	movaps [\dst], \a
+	movaps [\dst+0x10], \b
+	movaps [\dst+0x20], \c
+	movaps [\dst+0x30], \d
+.endm
+
+.macro matcopy da, db, dc, dd, sa, sb, sc, sd
+	movaps \da, \sa
+	movaps \db, \sb
+	movaps \dc, \sc
+	movaps \dd, \sd
+.endm
+
+.macro matadd da, db, dc, dd, sa, sb, sc, sd
+	addps \da, \sa
+	addps \db, \sb
+	addps \dc, \sc
+	addps \dd, \sd
+.endm
+
+.macro matsub da, db, dc, dd, sa, sb, sc, sd
+	subps \da, \sa
+	subps \db, \sb
+	subps \dc, \sc
+	subps \dd, \sd
+.endm
+
+.macro ident   da, db, dc, dd
+	movups \da, ident0
+	movups \db, ident1
+	movups \dc, ident2
+	movups \dd, ident3
+.endm
+
+.macro scalmat da, db, dc, dd, sx, sy, sz
+	movss    \da, \sx
+	insertps \db, \sy, 0x1E
+	insertps \dc, \sz, 0x2D
+	movups \dd, ident3
+.endm
+
+#get sin of single element of xmm register
+.macro sin dst, src
+	fst \src
+	fsin
+	fstp \dst
+.endm
+
+#get cos of single element of xmm register
+.macro cos dst, src
+	fst \src
+	fcos
+	fstp \dst
+.endm
+
+#sum all components in an xmm
+.macro sumxmm   dst, src, tmp
+    movshdup    \tmp, \src
+    addps       \dst, \tmp
+    movhlps     \tmp, \dst
+    addss       \dst, \tmp
+.endm
+
+
+# get dot product of 2 xmm registers
+.macro dot dst, src
+	dpps dst, src, 0xFF
+.endm
+
+.macro veclen dst, src
+	dot \dst, \src
+	sqrtss \dst, \dst 
+.endm
+
+# normalize an xmm register
+.macro normalize dst, src, tmp
+	movaps  \tmp, \src
+	movaps  \dst, \src
+	dot     \tmp, \tmp
+	rsqrtps \tmp, \tmp
+	mulps   \dst, \tmp
+.endm
+
+#http://fastcpp.blogspot.com/2011/04/vector-cross-product-using-sse-code.html
+#_mm_sub_ps(
+#    _mm_mul_ps(_mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 0, 2, 1)), _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 1, 0, 2))), 
+#    _mm_mul_ps(_mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 1, 0, 2)), _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 0, 2, 1)))
+.macro cross dst, src, tmp
+	movaps \src, \tmp
+	
+.endm
+
+.macro rotmatX da, db, dc, dd, theta
+	movups \da, ident0
+	insertps \db, \sy, 0x1E
+	insertps \db, \sz, 0x2D
+	movups \dd, ident3
+.endm
+
+.macro transmat da, db, dc, dd, transv
+	ident \da, \db, \dc, \dd 
+	movaps \transv
+.endm
+
+# switches matrices from column major (opengl) to row major (directx) and back
+.macro matTranspose a, b, c, d, temp1, temp2, temp3, temp4
+	movaps   \temp1, \a
+	movaps   \temp2, \c
+	movaps   \temp3, \a
+	movaps   \temp4, \c
+	unpcklps \temp1, \b
+	unpcklps \temp2, \d
+	unpckhps \temp3, \b
+	unpckhps \temp4, \d
+	
+	movaps   \a, \temp1
+	movaps   \b, \temp1
+	movaps   \c, \temp3
+	movaps   \d, \temp3
+	movhlps  \b, \temp2
+	movlhps  \a, \temp2
+	movlhps  \c, \temp4
+	movhlps  \d, \temp4
+.endm
+
+# assumes the 4x4 is already transposed
+# can be simplified with a multiply-add instruction
+# see here: https://www.felixcloutier.com/x86/VFMADD132PS:VFMADD213PS:VFMADD231PS.html
+# testing sequential vs parallel instructions...
+.macro matmul_4x4_4x1_transposed dst, a, b, c, d, vec, temp1, temp2, temp3, temp4
+	movaps \dst,   \vec
+	movaps \temp1, \vec
+	movaps \temp2, \vec
+	movaps \temp3, \vec
+	mulps  \dst,   \a
+	mulps  \temp1, \b
+	mulps  \temp2, \c
+	mulps  \temp3, \d
+	addps  \dst,   \temp1
+	addps  \temp2, \temp3
+	addps  \dst,   \temp2
+.endm
+
+# args are row-major
+# mat0 *= mat4
+matmul_4x4_4x4:
+	sub rsp, 0x48
+	matstor rsp, mat4
+	sub rsp, 0x40
+	matstor rsp, mat8
+	sub rsp, 0x40
+	matstor rsp, mat12
+	
+	#matload 
+	# matTranspose              mat0,  mat8
+	# mat8 = mat0 * mat4
+	matmul_4x4_4x1_transposed xmm8,  mat0, xmm4, mat12
+	matmul_4x4_4x1_transposed xmm9,  mat0, xmm5, mat12
+	matmul_4x4_4x1_transposed xmm10, mat0, xmm6, mat12
+	matmul_4x4_4x1_transposed xmm11, mat0, xmm7, mat12
+	# mat0 = mat8
+	matcopy mat0, mat8
+	
+	matload mat12, rsp
+	add rsp, 0x40
+	matload mat8,  rsp
+	add rsp, 0x40
+	matload mat4, rsp
+	add rsp, 0x48
+	
+    ret
+	
+	
+
+
+
+
 printstr:
 	sub rsp, 0x8
 
@@ -45,20 +240,57 @@ printxmm0int:
 	add rsp, 0x18
 	ret
 
+.macro pushall
+	push rax
+	push rbx
+	push rcx
+	push rdx
+	push rsp
+	push rsi
+	push rbp
+	push rdi
+	push r8
+	push r9
+	push r10
+	push r11
+	push r12
+	push r13
+	push r14
+	push r15
+.endm
+
+.macro popall
+	pop r15
+	pop r14
+	pop r13
+	pop r12
+	pop r11
+	pop r10
+	pop r9
+	pop r8
+	pop rdi
+	pop rbp
+	pop rsi
+	pop rsp
+	pop rdx
+	pop rcx
+	pop rbx
+	pop rax
+.endm
+
 printxmm0flt:
-	sub rsp, 0x428
+	sub rsp, 0x300
+	pushall
+	sub rsp, 0x338
 
-	mov [rsp+0x18], rax
-	mov [rsp+0x10], rdi
-
-	fxsave [rsp+0x20]
+	fxsave [rsp+0x30]
 
 
-	movups [rsp], xmm0
-	movss xmm0, [rsp]
-	movss xmm1, [rsp+4]
-	movss xmm2, [rsp+8]
-	movss xmm3, [rsp+12]
+	movups [rsp+0x10], xmm0
+	movss xmm0, [rsp+0x10]
+	movss xmm1, [rsp+0x14]
+	movss xmm2, [rsp+0x18]
+	movss xmm3, [rsp+0x1C]
 	
 	mov rdi, OFFSET xmm0formatflt
 	cvtss2sd xmm0, xmm0
@@ -69,12 +301,11 @@ printxmm0flt:
 	mov rax, 0x4
 	call printf
 
-	fxrstor [rsp+0x20]
+	fxrstor [rsp+0x30]
 
-	mov rax,[rsp+0x18]
-	mov rdi,[rsp+0x10]
-
-	add rsp, 0x428
+	add rsp, 0x338
+	popall
+	add rsp, 0x300
 	ret
 
 #pass arg as 4 floats in xmm0, answer in eax
@@ -337,10 +568,6 @@ raster_do2ndswap:
 
 	raster_yloop:
 		#	// This is here so we can draw the middle line properly
-		#if (mb < 0) { if (bx < b.x) bx = b.x, bz = b.z, alpha = 0; }
-		#else        { if (bx > b.x) bx = b.x, bz = b.z, alpha = 0; }
-		#if (mc < 0) { if (cx < c.x) cx = c.x, cz = c.z, beta  = 0; }
-		#else        { if (cx > c.x) cx = c.x, cz = c.z, beta  = 0; }
 
 		xor rsi, rsi		
 
