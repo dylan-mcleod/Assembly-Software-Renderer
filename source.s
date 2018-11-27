@@ -46,8 +46,13 @@ printxmm0int:
 	ret
 
 printxmm0flt:
-	sub rsp, 0x218
-	fxsave [rsp+0x10]
+	sub rsp, 0x228
+
+	mov [rsp+0x18], rax
+	mov [rsp+0x10], rdi
+
+	fxsave [rsp+0x20]
+
 
 	movups [rsp], xmm0
 	movss xmm0, [rsp]
@@ -64,8 +69,12 @@ printxmm0flt:
 	mov rax, 0x4
 	call printf
 
-	fxrstor [rsp+0x10]
-	add rsp, 0x218
+	fxrstor [rsp+0x20]
+
+	mov rax,[rsp+0x18]
+	mov rdi,[rsp+0x10]
+
+	add rsp, 0x228
 	ret
 
 #pass arg as 4 floats in xmm0, answer in eax
@@ -134,6 +143,11 @@ raster:
 	push rbp
 	mov rbp, rsp
 	
+	movaps [rbp+0x90], xmm2
+	movaps [rbp+0x80], xmm1
+	movaps [rbp+0x70], xmm0
+	
+raster_do2ndswap:
 	#set dy, and prepare for a swap
 	cmp rdi, 1
 	je raster_topdown
@@ -159,15 +173,29 @@ raster:
 	raster_extopdown:
 	
 	comiss xmm3, xmm5
-	jge raster_noswap1
+	jnc raster_noswap1
 		swapxmm  xmm0, xmm1, xmm3
+	
+		movaps [rbp+0x90], xmm2
+		movaps [rbp+0x80], xmm1
+		movaps [rbp+0x70], xmm0
+
 		#<swap colors, normals>
+
+		jmp raster_do2ndswap
 	raster_noswap1:
 
 	comiss xmm4, xmm6
-	jge raster_noswap2
+	jnc raster_noswap2
 		swapxmm  xmm0, xmm2, xmm3
+	
+		movaps [rbp+0x90], xmm2
+		movaps [rbp+0x80], xmm1
+		movaps [rbp+0x70], xmm0
+
 		#<swap colors, normals>
+
+		jmp raster_do2ndswap
 	raster_noswap2:
 	
 	movaps [rbp+0x90], xmm2
@@ -197,12 +225,13 @@ raster:
 	movss  xmm4, [rbp-0x20]
 	movss  xmm5, [rbp-0x1C]
 	comiss xmm4, xmm5
-	jl rasternoswap_mbc     # make sure mb < mc (b should be the left point, c will be the right) 
+	jc rasternoswap_mbc     # make sure mb < mc (b should be the left point, c will be the right) 
 
 		swapxmm  xmm1, xmm2, xmm3
 		#<swap colors, normals>
-		movss   [rbp-0x20], xmm5
-		movss   [rbp-0x1C], xmm4
+		movaps   xmm6, [rbp-0x20]
+		shufps   xmm6, xmm6, 0xB1
+		movaps   [rbp-0x20], xmm6
 
 	rasternoswap_mbc:
 	
@@ -216,7 +245,7 @@ raster:
 		#bottom up
 		#compute y_start
 		movss    xmm7, fltZeros
-		minss    xmm7, [rbp+0x74]
+		maxss    xmm7, [rbp+0x74]
 		cvtss2si eax, xmm7
 		mov      [rbp-0x30], eax # y_start
 
@@ -265,7 +294,8 @@ raster:
 	rcpss xmm6, xmm6
 
 	movss [rbp-0x40], xmm3 # mcfalph
-	movss [rbp-0x3C], xmm6 # mcfbeta
+	movd  eax, xmm6
+	mov [rbp-0x3C], eax # mcfbeta
 
 	# compute ayDist
 	mov       eax, [rbp-0x30] # y_start
@@ -283,6 +313,7 @@ raster:
 	addps  xmm4, xmm3         # + ax ax az az
 	movaps [rbp-0x50], xmm4  # bx cx bz cz
 
+	movaps xmm4, [rbp-0x100]
 	# compute starting alpha, beta
 	mulps  xmm4, [rbp-0x40]
 	movups xmm5, fltOnes
@@ -299,10 +330,12 @@ raster:
 		#if (mc < 0) { if (cx < c.x) cx = c.x, cz = c.z, beta  = 0; }
 		#else        { if (cx > c.x) cx = c.x, cz = c.z, beta  = 0; }
 
+		xor rsi, rsi		
+
 		#todo: round, don't floor
 		movss    xmm3, [rbp-0x50]
 		movss    xmm4, [rbp-0x4C]
-		maxss    xmm5, fltZeros    # xstart (float)   
+		maxss    xmm3, fltZeros    # xstart (float)   
 		minss    xmm4, winWidth2   
 		cvtss2si esi, xmm3         # xstart (int)
 		cvtss2si r11d, xmm4         # xend   (int) 
@@ -339,14 +372,16 @@ raster:
 		mov      r10d,  winWidth
 		xor      rdx,   rdx
 		mov      edx,   esi        # x = xstart
+		xor  rax, rax
 		raster_xloop:
 			
-			mov  rcx, 0xFFFF00FF
 			
-			xor  rax, rax
 			mov  eax, r8d
+			mov  rcx, 0xFFFF00FF
+
 			imul eax, r10d
 			add  eax, edx
+
 			mov  rbx, globalPixelBufPtr
 			mov  [rbx+rax*4], rcx
 
@@ -361,9 +396,12 @@ raster:
 
 		movaps   xmm3, [rbp-0x50]
 		addps    xmm3, [rbp-0x20]
+		movaps   [rbp-0x50], xmm3
 
 		movaps   xmm3, [rbp-0x60]
 		subps    xmm3, [rbp-0x40]
+		movaps   [rbp-0x60], xmm3
+
 		
 		add      r8d,  r9d         # y += dy
 
@@ -671,7 +709,7 @@ quit:
 	syscall
 
 .data
-	hardcodedtri: .float 100,120,1,0, 150,300,3,0, 260,130,2,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
+	hardcodedtri: .float 100,130,1,0, 150,300,3,0, 260,120,2,0,  0,0,-1,0, 0,0,-1,0, 0,0,-1,0,  1,0,0,1, 0,1,0,1, 0,0,1,1 
 
 
 	fltAbsMask: .int 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF
