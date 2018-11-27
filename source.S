@@ -640,7 +640,7 @@ raster_do2ndswap:
 		xor  rax, rax
 
 		mov  rbx, globalPixelBufPtr
-
+		mov  r12, globalDepthBufPtr
 		raster_xloop:
 			
 			
@@ -661,12 +661,11 @@ raster_do2ndswap:
 			mulss xmm4, normMul
 			mulss xmm3, normMul
 			mulss xmm5, normMul
-			cvtss2si r12d, xmm3
-			cvtss2si r13d, xmm4
-			cvtss2si r14d, xmm5
-			mov r15d, 255
+			#mov r15d, 255
 
-			movaps xmm0, [rbp+0x20]
+			movaps xmm0, [rbp+0x10]
+			movaps xmm1, [rbp+0x20]
+			movaps xmm2, [rbp+0x30]
 
 			
 			push rax
@@ -674,17 +673,30 @@ raster_do2ndswap:
 			mov r15d, eax
 			pop rax	
 			mov r15b, 255
+
+
+			#mulss xmm0, xmm3
+			#mulss xmm1, xmm3
+			#mulss xmm2, xmm3
 	
-			#mov  [rbx+rax*4], r15d
+			#addss xmm3, xmm0
+			#addss xmm3, xmm1
+			#addss xmm3, xmm2
 			
-			#mov cl, r15b
+			#movss xmm4, fltThrees
+		
+			#divss xmm3, xmm4
+			
+			#cvtss2si r13d, xmm3
+			#mov cl, r13b
 			#shl ecx, 8
-			#or cl, r14b
-			#shl ecx, 8
+			#cvtss2si r13d, xmm3
 			#or cl, r13b
 			#shl ecx, 8
-			#or cl, r12b
+			#cvtss2si r13d, xmm3
+			#or cl, r13b
 			#shl ecx, 8
+			#or cl, 255
 
 			imul eax, r10d
 			add  eax, edx
@@ -695,8 +707,12 @@ raster_do2ndswap:
 			cmp r8d, winHeight
 			jge raster_skipy
 			
-
-			mov  [rbx+rax*4], r15d
+			movss  xmm0, [r12+rax*4] 
+			comiss xmm9, xmm0
+			jc noshade
+			mov   [rbx+rax*4], r15d
+			movss [r12+rax*4], xmm9 
+			noshade:
 
 			subss xmm8, xmm6
 			addss xmm9, xmm7
@@ -781,6 +797,14 @@ inittexture:
 	call malloc
 	mov globalPixelBufPtr, rax
 	
+	mov rcx, winHeight
+	mov rdi, winWidth
+	imul rdi, rcx  
+	lea rdi, [rdi*4]
+	call malloc
+	mov globalDepthBufPtr, rax
+
+	
 	add rsp, 0x8
 	ret
 
@@ -789,11 +813,16 @@ clearwindow:
 	mov rax, pixelBufSize
 	
 	mov rbx, globalPixelBufPtr 
+	mov rdx, globalDepthBufPtr	
 	lea rcx, [rbx+rax]
+	mov r8d, 0
 clearwindow_while:
 	mov [rbx], rdi
+	mov [rdx], r8d
 	add rbx, 4
+	add rdx, 4
 	cmp rbx, rcx
+	
 	jl clearwindow_while
 	
 	ret
@@ -876,13 +905,13 @@ main:
 
 mainLoop:
 	
-	mov rdi, 0xFF00FFFF
+	mov rdi, 0x000000FF
 	call clearwindow
 
 	mov rdi, 100
 	mov rsi, 100
-	mov rdx, 0xFF0000FF
-	call drawpixel
+	#mov rdx, 0xFF0000FF
+	#call drawpixel
 
 	lea rax, vertexbuffer
 	lea rcx, objects
@@ -890,9 +919,9 @@ mainLoop:
 	mov rbx, curobject
 	add rcx, 8
 	looptillobjectfound:
-		add rdi, 1
+		inc rdi
 		cmp rdi, rbx
-		jge exitlooptillobjectfound
+		jg exitlooptillobjectfound
 
 		mov rsi, [rcx]
 		imul rsi, 72
@@ -914,6 +943,8 @@ mainLoop:
 	matmove     mat4, mat0
 	matload_ups mat0, _scalemat
 	call matmul_4x4_4x4
+	#matload_ups mat4, _transmat
+	#call matmul_4x4_4x4
 	matstor_ups modelmatrix, mat0
 
 	renderobject:
@@ -934,15 +965,21 @@ mainLoop:
 		push [rax+0x78]
 		push [rax+0x70]
 		push [rax+0x88]
-		push [rax+0x80]
+		push [rax+0x80]	
+
 		movups xmm8, [rax]
 		movups xmm9, [rax+24]
 		movups xmm10, [rax+48]
+		
 		matload_ups mat4 modelmatrix
 		matmul_4x4_4x1 xmm0, mat4, xmm8, mat12
 		matmul_4x4_4x1 xmm1, mat4, xmm9, mat12
 		matmul_4x4_4x1 xmm2, mat4, xmm10, mat12
 		#call printxmm0flt
+		movups xmm11, centerTheVertex	
+		addps xmm0, xmm11
+		addps xmm1, xmm11
+		addps xmm2, xmm11
 
 		movups xmm11, fltZeros	
 		movups xmm12, fltOnes	
@@ -960,9 +997,9 @@ mainLoop:
 		minps xmm10, xmm12
 		maxps xmm10, xmm11
 
-		movups [rsp], xmm8
-		movups [rsp-0x10], xmm9
-		movups [rsp-0x20], xmm10
+		movups [rsp+0x8], xmm8
+		movups [rsp+0x18], xmm9
+		movups [rsp+0x28], xmm10
 
 		mov rdi, 1
 		call raster
@@ -974,6 +1011,10 @@ mainLoop:
 		matmul_4x4_4x1 xmm0, mat4, xmm8, mat12
 		matmul_4x4_4x1 xmm1, mat4, xmm9, mat12
 		matmul_4x4_4x1 xmm2, mat4, xmm10, mat12
+		movups xmm11, centerTheVertex	
+		addps xmm0, xmm11
+		addps xmm1, xmm11
+		addps xmm2, xmm11
 		mov rdi, 0
 		call raster
 		add rsp, 0x90
@@ -1092,6 +1133,8 @@ quit:
 	curobject: .quad 1
 	vertexbuffer: .float -0.500, -0.500, -0.500,  0.000,  0.000, -1.000,-0.500,  0.500, -0.500,  0.000,  0.000, -1.000, 0.500,  0.500, -0.500,  0.000,  0.000, -1.000, 0.500,  0.500, -0.500,  0.000, -0.000, -1.000, 0.500, -0.500, -0.500,  0.000, -0.000, -1.000,-0.500, -0.500, -0.500,  0.000, -0.000, -1.000,-0.500, -0.500, -0.500,  0.000, -1.000,  0.000, 0.500, -0.500, -0.500,  0.000, -1.000,  0.000, 0.500, -0.500,  0.500,  0.000, -1.000,  0.000, 0.500, -0.500,  0.500, -0.000, -1.000,  0.000,-0.500, -0.500,  0.500, -0.000, -1.000, 0.000,-0.500, -0.500,-0.500, -0.000, -1.000,  0.000,-0.500, -0.500, -0.500, -1.000,  0.000,  0.000,-0.500, -0.500,  0.500, -1.000,  0.000,  0.000,-0.500,  0.500,  0.500, -1.000,  0.000,  0.000,-0.500,  0.500,  0.500, -1.000,  0.000, -0.000,-0.500,  0.500, -0.500, -1.000,  0.000, -0.000,-0.500, -0.500, -0.500, -1.000,  0.000, -0.000,-0.500,  0.500, -0.500,  0.000,  1.000,  0.000,-0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500,  0.500,  0.000,  1.000,  0.000, 0.500,  0.500, -0.500,  0.000,  1.000,  0.000,-0.500,  0.500, -0.500,  0.000,  1.000,  0.000, 0.500,  0.500, -0.500,  1.000,  0.000, -0.000, 0.500,  0.500,  0.500,  1.000,  0.000, -0.000, 0.500, -0.500,  0.500,  1.000,  0.000, -0.000, 0.500, -0.500,  0.500,  1.000,  0.000,  0.000, 0.500, -0.500, -0.500,  1.000,  0.000,  0.000, 0.500,  0.500, -0.500,  1.000,  0.000,  0.000,-0.500, -0.500,  0.500,  0.000,  0.000,  1.000, 0.500, -0.500,  0.500,  0.000,  0.000,  1.000, 0.500,  0.500,  0.500,  0.000,  0.000,  1.000, 0.500,  0.500,  0.500,  0.000,  0.000,  1.000,-0.500,  0.500,  0.500,  0.000,  0.000,  1.000,-0.500, -0.500,  0.500,  0.000,  0.000,  1.000,  0.524,  0.000,  0.847,  0.000, -0.356,  0.934,-0.524,  0.000,  0.847,  0.000, -0.356,  0.934, 0.000, -0.847,  0.524,  0.000, -0.356,  0.934, 0.524,  0.000,  0.847,  0.000,  0.356,  0.934, 0.000,  0.847,  0.524,  0.000,  0.356,  0.934,-0.524,  0.000,  0.847,  0.000,  0.356,  0.934, 0.524,  0.000,  0.847,  0.577, -0.577,  0.577, 0.000, -0.847,  0.524,  0.577, -0.577,  0.577, 0.847, -0.524,  0.000,  0.577, -0.577,  0.577, 0.524,  0.000,  0.847,  0.934,  0.000,  0.356, 0.847, -0.524,  0.000,  0.934,  0.000,  0.356, 0.847,  0.524,  0.000,  0.934,  0.000,  0.356, 0.524,  0.000,  0.847,  0.577,  0.577,  0.577, 0.847,  0.524,  0.000,  0.577,  0.577,  0.577, 0.000,  0.847,  0.524,  0.577,  0.577,  0.577, 0.847, -0.524,  0.000,  0.934,  0.000, -0.356, 0.524,  0.000, -0.847,  0.934,  0.000, -0.356, 0.847,  0.524,  0.000,  0.934,  0.000, -0.356, 0.847,  0.524,  0.000,  0.577,  0.577, -0.577, 0.524,  0.000, -0.847,  0.577,  0.577, -0.577, 0.000,  0.847, -0.524,  0.577,  0.577, -0.577, 0.847,  0.524,  0.000,  0.356,  0.934,  0.000, 0.000,  0.847, -0.524,  0.356,  0.934,  0.000, 0.000,  0.847,  0.524,  0.356,  0.934,  0.000, 0.000,  0.847,  0.524, -0.356,  0.934,  0.000, 0.000,  0.847, -0.524, -0.356,  0.934,  0.000,-0.847,  0.524,  0.000, -0.356,  0.934,  0.000, 0.000,  0.847,  0.524, -0.577,  0.577,  0.577,-0.847,  0.524,  0.000, -0.577,  0.577,  0.577, -0.524,  0.000,  0.847, -0.577,  0.577,  0.577,-0.524,  0.000,  0.847, -0.934,  0.000,  0.356,-0.847,  0.524,  0.000, -0.934,  0.000,  0.356,-0.847, -0.524,  0.000, -0.934,  0.000,  0.356,-0.524,  0.000,  0.847, -0.577, -0.577,  0.577,-0.847, -0.524,  0.000, -0.577, -0.577,  0.577, 0.000, -0.847,  0.524, -0.577, -0.577,  0.577, 0.000, -0.847,  0.524, -0.356, -0.934, -0.000,-0.847, -0.524,  0.000, -0.356, -0.934, -0.000, 0.000, -0.847, -0.524, -0.356, -0.934, -0.000, 0.000, -0.847,  0.524,  0.356, -0.934,  0.000, 0.000, -0.847, -0.524,  0.356, -0.934,  0.000, 0.847, -0.524,  0.000,  0.356, -0.934,  0.000, 0.847, -0.524,  0.000,  0.577, -0.577, -0.577, 0.000, -0.847, -0.524,  0.577, -0.577, -0.577, 0.524,  0.000, -0.847,  0.577, -0.577, -0.577,-0.524,  0.000, -0.847,  0.000, -0.356, -0.934, 0.524,  0.000, -0.847,  0.000, -0.356, -0.934, 0.000, -0.847, -0.524,  0.000, -0.356, -0.934,-0.524,  0.000, -0.847,  0.000,  0.356, -0.934, 0.000,  0.847, -0.524,  0.000,  0.356, -0.934, 0.524,  0.000, -0.847,  0.000,  0.356, -0.934,-0.524,  0.000, -0.847, -0.577,  0.577, -0.577,-0.847,  0.524,  0.000, -0.577,  0.577, -0.577, 0.000,  0.847, -0.524, -0.577,  0.577, -0.577,-0.524,  0.000, -0.847, -0.934,  0.000, -0.356,-0.847, -0.524,  0.000, -0.934,  0.000, -0.356,-0.847,  0.524,  0.000, -0.934,  0.000, -0.356,-0.524,  0.000, -0.847, -0.577, -0.577, -0.577, 0.000, -0.847, -0.524, -0.577, -0.577, -0.577,-0.847, -0.524,  0.000, -0.577, -0.577, -0.577
 	
+	centerTheVertex: .float 300, 200, 300, 0
+
 	mattest1:    .float 5,4,3,2, 6,7,8,9, 2,3,5,1, 9,4,6,3
 	mattest2:    .float 9,5,2,7, 9,3,7,2, 0,1,5,10, 0,9,8,1
 	modelmatrix: .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1
@@ -1122,7 +1165,7 @@ quit:
 	globalWindowPtr:   .space 8
 	pixelBufSize:      .quad 0
 	globalPixelBufPtr: .space 8
-	globalDepthBuf:    .space 8	
+	globalDepthBufPtr:    .space 8	
 	globalTexturePtr:  .space 8
 	globalRendererPtr: .space 8
 
