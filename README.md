@@ -1,5 +1,5 @@
 # Assembly-Software-Renderer
-My final project for CISP 310 (assembly).
+Group 3 final project for CISP 310 (assembly).
 A (work-in-progress) software renderer, supporting triangle rasterization, matrix multiplication, and makes (spotty) use SIMD operations. 
 The purpose of the project was to gain more familiarity with assembly, especially SIMD operations. While an attempt was made to make this efficient, it's not a serious attempt at outperforming one written in C++.
 
